@@ -3,6 +3,8 @@ from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_BREAK
 import os
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 
 def split_document(input_file_path, output_directory='split_documents', log_function=None):
     def update_status(message, type="info"):
@@ -44,20 +46,22 @@ def split_document(input_file_path, output_directory='split_documents', log_func
             # Add paragraph to current page
             all_pages[current_page_idx].append(para)
             
-            # Check for page breaks
+            # Check for page breaks using XML elements
             for run in para.runs:
-                if run.element.br_lst:  # Check for break elements
-                    for br in run.element.br_lst:
-                        if br.type_val == WD_BREAK.PAGE:  # If it's a page break
-                            update_status(f"Page break detected after paragraph: {para.text[:50]}...")
-                            current_page_idx += 1
-                            all_pages.append([])  # Start new page
-                            break
+                # Get the underlying XML element
+                element = run._element
+                # Look for <w:br w:type="page"/> elements
+                for br in element.findall('.//w:br', {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}):
+                    if br.get(qn('w:type')) == 'page':
+                        update_status(f"Page break detected after paragraph: {para.text[:50]}...")
+                        current_page_idx += 1
+                        all_pages.append([])
+                        break
         
         update_status(f"Document split into {len(all_pages)} pages")
         
         # Remove empty pages
-        all_pages = [page for page in all_pages if page]
+        all_pages = [page for page in all_pages if page and any(p.text.strip() for p in page)]
         
         if not all_pages:
             update_status("No content found in document", type="error")
