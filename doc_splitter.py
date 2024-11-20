@@ -38,22 +38,20 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         
         update_status("Analyzing document structure...")
         
-        # Collect all elements (paragraphs and tables) while preserving order
+        # Get all elements while preserving exact structure
         elements = []
-        for element in doc._body._body:
-            if element.tag.endswith(('p', 'tbl')):
-                elements.append(element)
-        
-        # Group elements by pages
         current_elements = []
-        for element in elements:
+        
+        # Iterate through all elements in document body
+        for element in doc._body._body:
             current_elements.append(element)
             
             # Check for page breaks
             if element.tag.endswith('p'):
                 for child in element.iter():
                     if child.tag.endswith('br') and child.get(qn('w:type')) == 'page':
-                        all_pages[current_page_idx] = current_elements
+                        # Store current page elements
+                        all_pages[current_page_idx] = current_elements.copy()
                         current_page_idx += 1
                         all_pages.append([])
                         current_elements = []
@@ -69,8 +67,10 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         # Create overview document (first page)
         update_status("Creating overview document...")
         overview_doc = Document()
+        # Copy the exact section properties from original document
+        overview_doc._body._body.clear()  # Clear default content
         for element in all_pages[0]:
-            overview_doc._body._body.append(element)
+            overview_doc._body._body.append(element.deepcopy())
         overview_path = os.path.join(output_directory, 'Overview.docx')
         overview_doc.save(overview_path)
         update_status(f"Saved overview document: {overview_path}", type="success")
@@ -84,17 +84,24 @@ def split_document(input_file_path, output_directory='split_documents', log_func
             
             update_status(f"Processing student document {idx}...")
             student_doc = Document()
+            student_doc._body._body.clear()  # Clear default content
             
-            # Add overview content (first page)
+            # Copy overview content exactly as is
             for element in all_pages[0]:
-                student_doc._body._body.append(element)
+                student_doc._body._body.append(element.deepcopy())
             
-            # Add page break
-            student_doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
+            # Add page break while preserving document properties
+            page_break = OxmlElement('w:p')
+            r = OxmlElement('w:r')
+            br = OxmlElement('w:br')
+            br.set(qn('w:type'), 'page')
+            r.append(br)
+            page_break.append(r)
+            student_doc._body._body.append(page_break)
             
-            # Add student content (preserving all formatting)
+            # Add student content exactly as is
             for element in page_elements:
-                student_doc._body._body.append(element)
+                student_doc._body._body.append(element.deepcopy())
             
             # Save student document
             student_count += 1
