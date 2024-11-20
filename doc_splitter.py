@@ -5,6 +5,7 @@ from docx.enum.text import WD_BREAK
 import os
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from copy import deepcopy
 
 def split_document(input_file_path, output_directory='split_documents', log_function=None):
     def update_status(message, type="info"):
@@ -39,7 +40,6 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         update_status("Analyzing document structure...")
         
         # Get all elements while preserving exact structure
-        elements = []
         current_elements = []
         
         # Iterate through all elements in document body
@@ -67,10 +67,15 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         # Create overview document (first page)
         update_status("Creating overview document...")
         overview_doc = Document()
-        # Copy the exact section properties from original document
         overview_doc._body._body.clear()  # Clear default content
+        
+        # Copy section properties from original document
+        overview_doc._body._body.append(doc._body._sectPr)
+        
+        # Copy first page content
         for element in all_pages[0]:
-            overview_doc._body._body.append(element.deepcopy())
+            overview_doc._body._body.append(element)
+        
         overview_path = os.path.join(output_directory, 'Overview.docx')
         overview_doc.save(overview_path)
         update_status(f"Saved overview document: {overview_path}", type="success")
@@ -86,11 +91,14 @@ def split_document(input_file_path, output_directory='split_documents', log_func
             student_doc = Document()
             student_doc._body._body.clear()  # Clear default content
             
-            # Copy overview content exactly as is
-            for element in all_pages[0]:
-                student_doc._body._body.append(element.deepcopy())
+            # Copy section properties
+            student_doc._body._body.append(doc._body._sectPr)
             
-            # Add page break while preserving document properties
+            # Copy overview content
+            for element in all_pages[0]:
+                student_doc._body._body.append(element)
+            
+            # Add page break
             page_break = OxmlElement('w:p')
             r = OxmlElement('w:r')
             br = OxmlElement('w:br')
@@ -99,9 +107,9 @@ def split_document(input_file_path, output_directory='split_documents', log_func
             page_break.append(r)
             student_doc._body._body.append(page_break)
             
-            # Add student content exactly as is
+            # Add student content
             for element in page_elements:
-                student_doc._body._body.append(element.deepcopy())
+                student_doc._body._body.append(element)
             
             # Save student document
             student_count += 1
