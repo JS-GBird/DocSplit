@@ -58,12 +58,12 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         def copy_document_part(source_doc, target_doc, start_idx=None, end_idx=None):
             """Helper function to copy document parts while preserving formatting"""
             # Copy styles part if it exists
-            if source_doc.part.styles_part:
-                target_doc.part.styles_part = deepcopy(source_doc.part.styles_part)
+            if hasattr(source_doc.part, '_styles_part') and source_doc.part._styles_part:
+                target_doc.part._styles_part = deepcopy(source_doc.part._styles_part)
             
             # Copy numbering part if it exists
-            if hasattr(source_doc.part, 'numbering_part') and source_doc.part.numbering_part:
-                target_doc.part.numbering_part = deepcopy(source_doc.part.numbering_part)
+            if hasattr(source_doc.part, '_numbering_part') and source_doc.part._numbering_part:
+                target_doc.part._numbering_part = deepcopy(source_doc.part._numbering_part)
             
             # Copy content
             elements = source_doc.element.body[start_idx:end_idx] if start_idx is not None else source_doc.element.body
