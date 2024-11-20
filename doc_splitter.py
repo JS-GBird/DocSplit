@@ -42,6 +42,9 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         # Get all elements while preserving exact structure
         current_elements = []
         
+        # Store section properties
+        section_props = doc._element.body.sectPr
+        
         # Iterate through all elements in document body
         for element in doc._body._body:
             current_elements.append(element)
@@ -69,12 +72,13 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         overview_doc = Document()
         overview_doc._body._body.clear()  # Clear default content
         
-        # Copy section properties from original document
-        overview_doc._body._body.append(doc._body._sectPr)
-        
         # Copy first page content
         for element in all_pages[0]:
             overview_doc._body._body.append(element)
+        
+        # Add section properties at the end
+        if section_props is not None:
+            overview_doc._element.body.append(section_props)
         
         overview_path = os.path.join(output_directory, 'Overview.docx')
         overview_doc.save(overview_path)
@@ -90,9 +94,6 @@ def split_document(input_file_path, output_directory='split_documents', log_func
             update_status(f"Processing student document {idx}...")
             student_doc = Document()
             student_doc._body._body.clear()  # Clear default content
-            
-            # Copy section properties
-            student_doc._body._body.append(doc._body._sectPr)
             
             # Copy overview content
             for element in all_pages[0]:
@@ -110,6 +111,10 @@ def split_document(input_file_path, output_directory='split_documents', log_func
             # Add student content
             for element in page_elements:
                 student_doc._body._body.append(element)
+            
+            # Add section properties at the end
+            if section_props is not None:
+                student_doc._element.body.append(section_props)
             
             # Save student document
             student_count += 1
