@@ -59,8 +59,9 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         update_status("Creating overview document...")
         overview_doc = Document()
         
-        # Copy document properties and styles
-        overview_doc.styles = doc.styles
+        # Copy document styles by copying the styles XML
+        overview_doc._element.styles = deepcopy(doc._element.styles)
+        overview_doc._element.numbering = deepcopy(doc._element.numbering)
         
         # Copy content up to first page break
         end_idx = page_breaks[0] if page_breaks else len(doc.paragraphs)
@@ -85,8 +86,9 @@ def split_document(input_file_path, output_directory='split_documents', log_func
             update_status(f"Processing student document {student_count}...")
             student_doc = Document()
             
-            # Copy document properties and styles
-            student_doc.styles = doc.styles
+            # Copy document styles by copying the styles XML
+            student_doc._element.styles = deepcopy(doc._element.styles)
+            student_doc._element.numbering = deepcopy(doc._element.numbering)
             
             # Copy overview content
             update_status("Adding overview content...")
@@ -113,7 +115,10 @@ def split_document(input_file_path, output_directory='split_documents', log_func
             student_count += 1
             update_status(f"Processing final student document {student_count}...")
             student_doc = Document()
-            student_doc.styles = doc.styles
+            
+            # Copy document styles by copying the styles XML
+            student_doc._element.styles = deepcopy(doc._element.styles)
+            student_doc._element.numbering = deepcopy(doc._element.numbering)
             
             # Copy overview content
             for element in doc.element.body[:page_breaks[0]]:
