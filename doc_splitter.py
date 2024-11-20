@@ -1,11 +1,8 @@
 import logging
 from docx import Document
-from docx.shared import Pt
 from docx.enum.text import WD_BREAK
 import os
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
-from copy import deepcopy
+import shutil
 
 def split_document(input_file_path, output_directory='split_documents', log_function=None):
     def update_status(message, type="info"):
@@ -21,7 +18,6 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         raise FileNotFoundError(error_msg)
     
     update_status(f"Found input file: {input_file_path}")
-    update_status(f"File size: {os.path.getsize(input_file_path)/1024:.2f} KB")
     
     # Create output directory
     if not os.path.exists(output_directory):
@@ -29,106 +25,77 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         update_status(f"Created output directory: {output_directory}")
     
     try:
-        # Load the input document
-        update_status("Loading document...")
-        doc = Document(input_file_path)
-        
-        # Find all section breaks (page breaks)
-        page_breaks = []
-        current_length = 0
-        
-        update_status("Analyzing document structure...")
-        
-        # Iterate through paragraphs to find page breaks
-        for para in doc.paragraphs:
-            current_length += 1
-            for run in para.runs:
-                element = run._element
-                for br in element.findall('.//w:br', {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}):
-                    if br.get(qn('w:type')) == 'page':
-                        page_breaks.append(current_length)
-                        update_status(f"Found page break at position {current_length}")
-        
-        if not page_breaks:
-            update_status("No page breaks found in document", "warning")
-            return 0
-            
-        update_status(f"Found {len(page_breaks)} page breaks")
-        
-        def copy_document_part(source_doc, target_doc, start_idx=None, end_idx=None):
-            """Helper function to copy document parts while preserving formatting"""
-            # Copy styles part if it exists
-            if hasattr(source_doc.part, '_styles_part') and source_doc.part._styles_part:
-                target_doc.part._styles_part = deepcopy(source_doc.part._styles_part)
-            
-            # Copy numbering part if it exists
-            if hasattr(source_doc.part, '_numbering_part') and source_doc.part._numbering_part:
-                target_doc.part._numbering_part = deepcopy(source_doc.part._numbering_part)
-            
-            # Copy content
-            elements = source_doc.element.body[start_idx:end_idx] if start_idx is not None else source_doc.element.body
-            for element in elements:
-                target_doc.element.body.append(deepcopy(element))
-        
-        # Create overview document (first page)
-        update_status("Creating overview document...")
-        overview_doc = Document()
-        copy_document_part(doc, overview_doc, end_idx=page_breaks[0])
-        
+        # First, create the overview document by copying the original
         overview_path = os.path.join(output_directory, 'Overview.docx')
-        overview_doc.save(overview_path)
-        update_status(f"Saved overview document: {overview_path}", type="success")
+        shutil.copy2(input_file_path, overview_path)
+        update_status("Created overview document")
         
-        # Create student documents
+        # Open the overview document and remove everything after first page break
+        doc = Document(overview_path)
+        
+        # Find the first page break
+        first_break_idx = None
+        for i, para in enumerate(doc.paragraphs):
+            for run in para.runs:
+                if any(br.type == WD_BREAK.PAGE for br in run._element.br_lst):
+                    first_break_idx = i
+                    break
+            if first_break_idx is not None:
+                break
+        
+        # Remove everything after the first page break
+        if first_break_idx is not None:
+            for _ in range(len(doc.paragraphs) - first_break_idx - 1):
+                p = doc.paragraphs[first_break_idx + 1]._element
+                p.getparent().remove(p)
+            doc.save(overview_path)
+            update_status("Saved overview document with first page content")
+        
+        # Now create student documents
         student_count = 0
-        start_idx = 0
+        current_student_doc = None
+        current_paras = []
         
-        for i, break_idx in enumerate(page_breaks):
-            # Skip if this would create an empty document
-            if break_idx - start_idx <= 1:
-                start_idx = break_idx
-                continue
+        # Open original document
+        original_doc = Document(input_file_path)
+        
+        # Process paragraphs
+        for i, para in enumerate(original_doc.paragraphs):
+            # Check for page break
+            has_page_break = False
+            for run in para.runs:
+                if any(br.type == WD_BREAK.PAGE for br in run._element.br_lst):
+                    has_page_break = True
+                    break
+            
+            if has_page_break or i == len(original_doc.paragraphs) - 1:
+                # Save current student document if we have content
+                if current_paras:
+                    student_count += 1
+                    student_path = os.path.join(output_directory, f'Student_{student_count}.docx')
+                    # Copy original document as template
+                    shutil.copy2(input_file_path, student_path)
+                    update_status(f"Creating student document {student_count}...")
+                    
+                    # Open and modify the copy
+                    student_doc = Document(student_path)
+                    
+                    # Keep only relevant paragraphs
+                    while len(student_doc.paragraphs) > 0:
+                        p = student_doc.paragraphs[0]._element
+                        p.getparent().remove(p)
+                    
+                    # Add content
+                    for p in current_paras:
+                        student_doc.add_paragraph(p.text)
+                    
+                    student_doc.save(student_path)
+                    update_status(f"Saved student document {student_count}")
                 
-            student_count += 1
-            update_status(f"Processing student document {student_count}...")
-            student_doc = Document()
-            
-            # Copy overview content
-            update_status("Adding overview content...")
-            copy_document_part(doc, student_doc, end_idx=page_breaks[0])
-            
-            # Add page break after overview
-            student_doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
-            
-            # Copy student content
-            update_status("Adding student content...")
-            copy_document_part(doc, student_doc, start_idx=start_idx, end_idx=break_idx)
-            
-            # Save student document
-            output_path = os.path.join(output_directory, f'Student_{student_count}.docx')
-            student_doc.save(output_path)
-            update_status(f"Saved student document: {output_path}", type="success")
-            
-            start_idx = break_idx
-        
-        # Process the last section if it exists
-        if start_idx < len(doc.element.body) - 1:
-            student_count += 1
-            update_status(f"Processing final student document {student_count}...")
-            student_doc = Document()
-            
-            # Copy overview content
-            copy_document_part(doc, student_doc, end_idx=page_breaks[0])
-            
-            # Add page break after overview
-            student_doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
-            
-            # Copy final student content
-            copy_document_part(doc, student_doc, start_idx=start_idx)
-            
-            output_path = os.path.join(output_directory, f'Student_{student_count}.docx')
-            student_doc.save(output_path)
-            update_status(f"Saved student document: {output_path}", type="success")
+                # Start new document
+                current_paras = []
+            else:
+                current_paras.append(para)
         
         # Add verification at the end
         if student_count == 0:
