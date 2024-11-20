@@ -55,18 +55,25 @@ def split_document(input_file_path, output_directory='split_documents', log_func
             
         update_status(f"Found {len(page_breaks)} page breaks")
         
+        def copy_document_part(source_doc, target_doc, start_idx=None, end_idx=None):
+            """Helper function to copy document parts while preserving formatting"""
+            # Copy styles part if it exists
+            if source_doc.part.styles_part:
+                target_doc.part.styles_part = deepcopy(source_doc.part.styles_part)
+            
+            # Copy numbering part if it exists
+            if hasattr(source_doc.part, 'numbering_part') and source_doc.part.numbering_part:
+                target_doc.part.numbering_part = deepcopy(source_doc.part.numbering_part)
+            
+            # Copy content
+            elements = source_doc.element.body[start_idx:end_idx] if start_idx is not None else source_doc.element.body
+            for element in elements:
+                target_doc.element.body.append(deepcopy(element))
+        
         # Create overview document (first page)
         update_status("Creating overview document...")
         overview_doc = Document()
-        
-        # Copy document styles by copying the styles XML
-        overview_doc._element.styles = deepcopy(doc._element.styles)
-        overview_doc._element.numbering = deepcopy(doc._element.numbering)
-        
-        # Copy content up to first page break
-        end_idx = page_breaks[0] if page_breaks else len(doc.paragraphs)
-        for element in doc.element.body[:end_idx]:
-            overview_doc.element.body.append(deepcopy(element))
+        copy_document_part(doc, overview_doc, end_idx=page_breaks[0])
         
         overview_path = os.path.join(output_directory, 'Overview.docx')
         overview_doc.save(overview_path)
@@ -86,22 +93,16 @@ def split_document(input_file_path, output_directory='split_documents', log_func
             update_status(f"Processing student document {student_count}...")
             student_doc = Document()
             
-            # Copy document styles by copying the styles XML
-            student_doc._element.styles = deepcopy(doc._element.styles)
-            student_doc._element.numbering = deepcopy(doc._element.numbering)
-            
             # Copy overview content
             update_status("Adding overview content...")
-            for element in doc.element.body[:page_breaks[0]]:
-                student_doc.element.body.append(deepcopy(element))
+            copy_document_part(doc, student_doc, end_idx=page_breaks[0])
             
             # Add page break after overview
             student_doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
             
             # Copy student content
             update_status("Adding student content...")
-            for element in doc.element.body[start_idx:break_idx]:
-                student_doc.element.body.append(deepcopy(element))
+            copy_document_part(doc, student_doc, start_idx=start_idx, end_idx=break_idx)
             
             # Save student document
             output_path = os.path.join(output_directory, f'Student_{student_count}.docx')
@@ -116,20 +117,14 @@ def split_document(input_file_path, output_directory='split_documents', log_func
             update_status(f"Processing final student document {student_count}...")
             student_doc = Document()
             
-            # Copy document styles by copying the styles XML
-            student_doc._element.styles = deepcopy(doc._element.styles)
-            student_doc._element.numbering = deepcopy(doc._element.numbering)
-            
             # Copy overview content
-            for element in doc.element.body[:page_breaks[0]]:
-                student_doc.element.body.append(deepcopy(element))
+            copy_document_part(doc, student_doc, end_idx=page_breaks[0])
             
             # Add page break after overview
             student_doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
             
             # Copy final student content
-            for element in doc.element.body[start_idx:]:
-                student_doc.element.body.append(deepcopy(element))
+            copy_document_part(doc, student_doc, start_idx=start_idx)
             
             output_path = os.path.join(output_directory, f'Student_{student_count}.docx')
             student_doc.save(output_path)
