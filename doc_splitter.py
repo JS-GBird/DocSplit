@@ -3,6 +3,7 @@ from docx import Document
 from docx.enum.text import WD_BREAK
 import os
 import shutil
+from docx.oxml import OxmlElement
 
 def split_document(input_file_path, output_directory='split_documents', log_function=None):
     def update_status(message, type="info"):
@@ -25,77 +26,73 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         update_status(f"Created output directory: {output_directory}")
     
     try:
-        # First, create the overview document by copying the original
-        overview_path = os.path.join(output_directory, 'Overview.docx')
-        shutil.copy2(input_file_path, overview_path)
-        update_status("Created overview document")
+        # Load the original document
+        doc = Document(input_file_path)
         
-        # Open the overview document and remove everything after first page break
-        doc = Document(overview_path)
-        
-        # Find the first page break
-        first_break_idx = None
+        # Find all page breaks
+        page_breaks = []
         for i, para in enumerate(doc.paragraphs):
             for run in para.runs:
                 if any(br.type == WD_BREAK.PAGE for br in run._element.br_lst):
-                    first_break_idx = i
-                    break
-            if first_break_idx is not None:
-                break
+                    page_breaks.append(i)
+                    update_status(f"Found page break at paragraph {i}")
         
-        # Remove everything after the first page break
-        if first_break_idx is not None:
-            for _ in range(len(doc.paragraphs) - first_break_idx - 1):
-                p = doc.paragraphs[first_break_idx + 1]._element
-                p.getparent().remove(p)
-            doc.save(overview_path)
-            update_status("Saved overview document with first page content")
+        if not page_breaks:
+            update_status("No page breaks found in document", "warning")
+            return 0
         
-        # Now create student documents
+        update_status(f"Found {len(page_breaks)} page breaks")
+        
+        # Get the overview content (first page)
+        overview_end = page_breaks[0]
+        
+        # Create student documents
         student_count = 0
-        current_student_doc = None
-        current_paras = []
         
-        # Open original document
-        original_doc = Document(input_file_path)
-        
-        # Process paragraphs
-        for i, para in enumerate(original_doc.paragraphs):
-            # Check for page break
-            has_page_break = False
-            for run in para.runs:
-                if any(br.type == WD_BREAK.PAGE for br in run._element.br_lst):
-                    has_page_break = True
-                    break
+        # Process each student page
+        for i in range(1, len(page_breaks), 2):  # Skip every other page break (student name pages)
+            student_count += 1
+            update_status(f"Processing student document {student_count}...")
             
-            if has_page_break or i == len(original_doc.paragraphs) - 1:
-                # Save current student document if we have content
-                if current_paras:
-                    student_count += 1
-                    student_path = os.path.join(output_directory, f'Student_{student_count}.docx')
-                    # Copy original document as template
-                    shutil.copy2(input_file_path, student_path)
-                    update_status(f"Creating student document {student_count}...")
-                    
-                    # Open and modify the copy
-                    student_doc = Document(student_path)
-                    
-                    # Keep only relevant paragraphs
-                    while len(student_doc.paragraphs) > 0:
-                        p = student_doc.paragraphs[0]._element
-                        p.getparent().remove(p)
-                    
-                    # Add content
-                    for p in current_paras:
-                        student_doc.add_paragraph(p.text)
-                    
-                    student_doc.save(student_path)
-                    update_status(f"Saved student document {student_count}")
-                
-                # Start new document
-                current_paras = []
-            else:
-                current_paras.append(para)
+            # Create new document for this student
+            student_path = os.path.join(output_directory, f'Student_{student_count}.docx')
+            shutil.copy2(input_file_path, student_path)
+            
+            # Open the copy and modify it
+            student_doc = Document(student_path)
+            
+            # Keep only the overview and the student's page
+            start_idx = page_breaks[i] if i < len(page_breaks) else None
+            end_idx = page_breaks[i + 1] if i + 1 < len(page_breaks) else None
+            
+            # Remove everything except overview and student page
+            paragraphs_to_keep = list(range(0, overview_end + 1))  # Overview
+            if start_idx is not None and end_idx is not None:
+                paragraphs_to_keep.extend(range(start_idx, end_idx + 1))  # Student page
+            elif start_idx is not None:
+                paragraphs_to_keep.extend(range(start_idx, len(student_doc.paragraphs)))  # Until end
+            
+            # Remove paragraphs not in our keep list
+            for idx in range(len(student_doc.paragraphs) - 1, -1, -1):
+                if idx not in paragraphs_to_keep:
+                    p = student_doc.paragraphs[idx]._element
+                    p.getparent().remove(p)
+            
+            student_doc.save(student_path)
+            update_status(f"Saved student document {student_count}")
+        
+        # Create overview document
+        overview_path = os.path.join(output_directory, 'Overview.docx')
+        shutil.copy2(input_file_path, overview_path)
+        overview_doc = Document(overview_path)
+        
+        # Keep only the overview page
+        for idx in range(len(overview_doc.paragraphs) - 1, overview_end, -1):
+            p = overview_doc.paragraphs[idx]._element
+            p.getparent().remove(p)
+        
+        overview_doc.save(overview_path)
+        update_status("Saved overview document")
         
         # Add verification at the end
         if student_count == 0:
