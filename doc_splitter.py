@@ -1,9 +1,10 @@
 import logging
 from docx import Document
+from docx.shared import Pt
 from docx.enum.text import WD_BREAK
 import os
-import shutil
 from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 
 def split_document(input_file_path, output_directory='split_documents', log_function=None):
     def update_status(message, type="info"):
@@ -19,6 +20,7 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         raise FileNotFoundError(error_msg)
     
     update_status(f"Found input file: {input_file_path}")
+    update_status(f"File size: {os.path.getsize(input_file_path)/1024:.2f} KB")
     
     # Create output directory
     if not os.path.exists(output_directory):
@@ -26,75 +28,80 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         update_status(f"Created output directory: {output_directory}")
     
     try:
-        # Load the original document
+        # Load the input document
+        update_status("Loading document...")
         doc = Document(input_file_path)
         
-        # Find all page breaks
-        page_breaks = []
-        for i, para in enumerate(doc.paragraphs):
-            for run in para.runs:
-                if any(br.type == WD_BREAK.PAGE for br in run._element.br_lst):
-                    page_breaks.append(i)
-                    update_status(f"Found page break at paragraph {i}")
+        # Initialize variables
+        all_pages = [[]]
+        current_page_idx = 0
         
-        if not page_breaks:
-            update_status("No page breaks found in document", "warning")
-            return 0
+        update_status("Analyzing document structure...")
         
-        update_status(f"Found {len(page_breaks)} page breaks")
+        # Collect all elements (paragraphs and tables) while preserving order
+        elements = []
+        for element in doc._body._body:
+            if element.tag.endswith(('p', 'tbl')):
+                elements.append(element)
         
-        # Get the overview content (first page)
-        overview_end = page_breaks[0]
+        # Group elements by pages
+        current_elements = []
+        for element in elements:
+            current_elements.append(element)
+            
+            # Check for page breaks
+            if element.tag.endswith('p'):
+                for child in element.iter():
+                    if child.tag.endswith('br') and child.get(qn('w:type')) == 'page':
+                        all_pages[current_page_idx] = current_elements
+                        current_page_idx += 1
+                        all_pages.append([])
+                        current_elements = []
+                        update_status(f"Page break detected - Page {current_page_idx}")
+                        break
         
-        # Create student documents
-        student_count = 0
+        # Add remaining elements to the last page
+        if current_elements:
+            all_pages[current_page_idx] = current_elements
         
-        # Process each student page
-        for i in range(1, len(page_breaks), 2):  # Skip every other page break (student name pages)
-            student_count += 1
-            update_status(f"Processing student document {student_count}...")
-            
-            # Create new document for this student
-            student_path = os.path.join(output_directory, f'Student_{student_count}.docx')
-            shutil.copy2(input_file_path, student_path)
-            
-            # Open the copy and modify it
-            student_doc = Document(student_path)
-            
-            # Keep only the overview and the student's page
-            start_idx = page_breaks[i] if i < len(page_breaks) else None
-            end_idx = page_breaks[i + 1] if i + 1 < len(page_breaks) else None
-            
-            # Remove everything except overview and student page
-            paragraphs_to_keep = list(range(0, overview_end + 1))  # Overview
-            if start_idx is not None and end_idx is not None:
-                paragraphs_to_keep.extend(range(start_idx, end_idx + 1))  # Student page
-            elif start_idx is not None:
-                paragraphs_to_keep.extend(range(start_idx, len(student_doc.paragraphs)))  # Until end
-            
-            # Remove paragraphs not in our keep list
-            for idx in range(len(student_doc.paragraphs) - 1, -1, -1):
-                if idx not in paragraphs_to_keep:
-                    p = student_doc.paragraphs[idx]._element
-                    p.getparent().remove(p)
-            
-            student_doc.save(student_path)
-            update_status(f"Saved student document {student_count}")
+        update_status(f"Document split into {len(all_pages)} pages")
         
-        # Create overview document
+        # Create overview document (first page)
+        update_status("Creating overview document...")
+        overview_doc = Document()
+        for element in all_pages[0]:
+            overview_doc._body._body.append(element)
         overview_path = os.path.join(output_directory, 'Overview.docx')
-        shutil.copy2(input_file_path, overview_path)
-        overview_doc = Document(overview_path)
-        
-        # Keep only the overview page
-        for idx in range(len(overview_doc.paragraphs) - 1, overview_end, -1):
-            p = overview_doc.paragraphs[idx]._element
-            p.getparent().remove(p)
-        
         overview_doc.save(overview_path)
-        update_status("Saved overview document")
+        update_status(f"Saved overview document: {overview_path}", type="success")
         
-        # Add verification at the end
+        # Create individual student documents
+        student_count = 0
+        for idx, page_elements in enumerate(all_pages[1:], 1):
+            if not page_elements:
+                update_status(f"Skipping empty page {idx}")
+                continue
+            
+            update_status(f"Processing student document {idx}...")
+            student_doc = Document()
+            
+            # Add overview content (first page)
+            for element in all_pages[0]:
+                student_doc._body._body.append(element)
+            
+            # Add page break
+            student_doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
+            
+            # Add student content (preserving all formatting)
+            for element in page_elements:
+                student_doc._body._body.append(element)
+            
+            # Save student document
+            student_count += 1
+            output_path = os.path.join(output_directory, f'Student_{student_count}.docx')
+            student_doc.save(output_path)
+            update_status(f"Saved student document: {output_path}", type="success")
+        
         if student_count == 0:
             update_status("No student documents were created. Check if document has page breaks.", "warning")
         else:
@@ -110,6 +117,7 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         update_status(error_msg, "error")
         raise
 
+# Add a test function
 def test_split_document(input_path):
     """Test function to verify document splitting"""
     print(f"Testing document split for: {input_path}")
