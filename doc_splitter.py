@@ -60,8 +60,13 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         
         update_status(f"Document split into {len(all_pages)} pages")
         
-        # Remove empty pages
-        all_pages = [page for page in all_pages if page and any(p.text.strip() for p in page)]
+        # Debug information about pages
+        for idx, page in enumerate(all_pages):
+            page_text = "\n".join(p.text.strip() for p in page if p.text.strip())
+            update_status(f"Page {idx + 1} content length: {len(page_text)} characters")
+        
+        # Remove empty pages - but keep pages that have at least one non-empty paragraph
+        all_pages = [page for page in all_pages if any(p.text.strip() for p in page)]
         
         if not all_pages:
             update_status("No content found in document", type="error")
@@ -73,8 +78,9 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         update_status("Creating overview document...")
         overview_doc = Document()
         for para in all_pages[0]:
-            new_para = overview_doc.add_paragraph()
-            new_para.text = para.text
+            if para.text.strip():  # Only add non-empty paragraphs
+                new_para = overview_doc.add_paragraph()
+                new_para.text = para.text
         overview_path = os.path.join(output_directory, 'Overview.docx')
         overview_doc.save(overview_path)
         update_status(f"Saved overview document: {overview_path}", type="success")
@@ -82,19 +88,21 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         # Create individual student documents (remaining pages)
         student_count = 0
         for idx, page in enumerate(all_pages[1:], 1):
-            # Skip empty pages
-            if not page or all(not p.text.strip() for p in page):
+            # Skip truly empty pages (no text content at all)
+            if not any(p.text.strip() for p in page):
                 update_status(f"Skipping empty page {idx}")
                 continue
                 
-            update_status(f"Processing student document {idx}...")
+            student_count += 1
+            update_status(f"Processing student document {student_count}...")
             student_doc = Document()
             
             # Add overview content
             update_status("Adding overview to student document...")
             for para in all_pages[0]:
-                new_para = student_doc.add_paragraph()
-                new_para.text = para.text
+                if para.text.strip():  # Only add non-empty paragraphs
+                    new_para = student_doc.add_paragraph()
+                    new_para.text = para.text
             
             # Add page break after overview
             student_doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
@@ -107,7 +115,6 @@ def split_document(input_file_path, output_directory='split_documents', log_func
                     new_para.text = para.text
             
             # Save student document
-            student_count += 1
             output_path = os.path.join(output_directory, f'Student_{student_count}.docx')
             student_doc.save(output_path)
             update_status(f"Saved student document: {output_path}", type="success")
