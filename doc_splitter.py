@@ -13,6 +13,23 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         if log_function:
             log_function(message, type)
     
+    def get_page_content(page):
+        """Get all content from a page including tables"""
+        content = []
+        for element in page:
+            if hasattr(element, 'text'):  # Regular paragraph
+                content.append(element.text.strip())
+            elif hasattr(element, 'tables'):  # Table container
+                for table in element.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            content.append(cell.text.strip())
+            elif hasattr(element, 'rows'):  # Direct table
+                for row in element.rows:
+                    for cell in row.cells:
+                        content.append(cell.text.strip())
+        return '\n'.join(filter(None, content))
+    
     # Verify input file exists
     if not os.path.exists(input_file_path):
         error_msg = f"Input file not found: {input_file_path}"
@@ -33,7 +50,7 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         doc = Document(input_file_path)
         
         # Verify document content
-        update_status(f"Document has {len(doc.paragraphs)} paragraphs")
+        update_status(f"Document has {len(doc.paragraphs)} paragraphs and {len(doc.tables)} tables")
         
         # Initialize variables
         all_pages = [[]]
@@ -41,32 +58,51 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         
         update_status("Analyzing document structure...")
         
-        # Iterate through paragraphs to detect page breaks
-        for para in doc.paragraphs:
-            # Add paragraph to current page
-            all_pages[current_page_idx].append(para)
+        # Process both paragraphs and tables
+        elements = []
+        current_table = None
+        
+        # Combine paragraphs and tables in order
+        for element in doc.element.body:
+            if element.tag.endswith('p'):
+                if current_table:
+                    elements.append(current_table)
+                    current_table = None
+                elements.append(doc.paragraphs[len([e for e in elements if hasattr(e, 'text')])])
+            elif element.tag.endswith('tbl'):
+                current_table = doc.tables[len([e for e in elements if hasattr(e, 'rows')])]
+                
+        # Add final table if exists
+        if current_table:
+            elements.append(current_table)
+        
+        # Process all elements
+        for element in elements:
+            # Add element to current page
+            all_pages[current_page_idx].append(element)
             
-            # Check for page breaks using XML elements
-            for run in para.runs:
-                # Get the underlying XML element
-                element = run._element
-                # Look for <w:br w:type="page"/> elements
-                for br in element.findall('.//w:br', {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}):
-                    if br.get(qn('w:type')) == 'page':
-                        update_status(f"Page break detected after paragraph: {para.text[:50]}...")
-                        current_page_idx += 1
-                        all_pages.append([])
-                        break
+            # Check for page breaks in paragraphs
+            if hasattr(element, 'runs'):
+                for run in element.runs:
+                    element = run._element
+                    for br in element.findall('.//w:br', {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}):
+                        if br.get(qn('w:type')) == 'page':
+                            update_status(f"Page break detected...")
+                            current_page_idx += 1
+                            all_pages.append([])
+                            break
         
         update_status(f"Document split into {len(all_pages)} pages")
         
-        # Debug information about pages
+        # Debug information about pages including table content
         for idx, page in enumerate(all_pages):
-            page_text = "\n".join(p.text.strip() for p in page if p.text.strip())
-            update_status(f"Page {idx + 1} content length: {len(page_text)} characters")
+            content = get_page_content(page)
+            update_status(f"Page {idx + 1} content length: {len(content)} characters")
+            if len(content) > 0:
+                update_status(f"Page {idx + 1} preview: {content[:100]}...")
         
-        # Remove empty pages - but keep pages that have at least one non-empty paragraph
-        all_pages = [page for page in all_pages if any(p.text.strip() for p in page)]
+        # Remove empty pages - check both text and table content
+        all_pages = [page for page in all_pages if get_page_content(page)]
         
         if not all_pages:
             update_status("No content found in document", type="error")
@@ -77,10 +113,17 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         # Create overview document (first page)
         update_status("Creating overview document...")
         overview_doc = Document()
-        for para in all_pages[0]:
-            if para.text.strip():  # Only add non-empty paragraphs
-                new_para = overview_doc.add_paragraph()
-                new_para.text = para.text
+        for element in all_pages[0]:
+            if hasattr(element, 'text'):  # Paragraph
+                if element.text.strip():
+                    new_para = overview_doc.add_paragraph()
+                    new_para.text = element.text
+            elif hasattr(element, 'rows'):  # Table
+                table = overview_doc.add_table(rows=len(element.rows), cols=len(element.rows[0].cells))
+                for i, row in enumerate(element.rows):
+                    for j, cell in enumerate(row.cells):
+                        table.rows[i].cells[j].text = cell.text
+        
         overview_path = os.path.join(output_directory, 'Overview.docx')
         overview_doc.save(overview_path)
         update_status(f"Saved overview document: {overview_path}", type="success")
@@ -88,8 +131,8 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         # Create individual student documents (remaining pages)
         student_count = 0
         for idx, page in enumerate(all_pages[1:], 1):
-            # Skip truly empty pages (no text content at all)
-            if not any(p.text.strip() for p in page):
+            # Skip truly empty pages
+            if not get_page_content(page):
                 update_status(f"Skipping empty page {idx}")
                 continue
                 
@@ -99,20 +142,32 @@ def split_document(input_file_path, output_directory='split_documents', log_func
             
             # Add overview content
             update_status("Adding overview to student document...")
-            for para in all_pages[0]:
-                if para.text.strip():  # Only add non-empty paragraphs
-                    new_para = student_doc.add_paragraph()
-                    new_para.text = para.text
+            for element in all_pages[0]:
+                if hasattr(element, 'text'):  # Paragraph
+                    if element.text.strip():
+                        new_para = student_doc.add_paragraph()
+                        new_para.text = element.text
+                elif hasattr(element, 'rows'):  # Table
+                    table = student_doc.add_table(rows=len(element.rows), cols=len(element.rows[0].cells))
+                    for i, row in enumerate(element.rows):
+                        for j, cell in enumerate(row.cells):
+                            table.rows[i].cells[j].text = cell.text
             
             # Add page break after overview
             student_doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
             
             # Add student content
             update_status("Adding student content...")
-            for para in page:
-                if para.text.strip():  # Only add non-empty paragraphs
-                    new_para = student_doc.add_paragraph()
-                    new_para.text = para.text
+            for element in page:
+                if hasattr(element, 'text'):  # Paragraph
+                    if element.text.strip():
+                        new_para = student_doc.add_paragraph()
+                        new_para.text = element.text
+                elif hasattr(element, 'rows'):  # Table
+                    table = student_doc.add_table(rows=len(element.rows), cols=len(element.rows[0].cells))
+                    for i, row in enumerate(element.rows):
+                        for j, cell in enumerate(row.cells):
+                            table.rows[i].cells[j].text = cell.text
             
             # Save student document
             output_path = os.path.join(output_directory, f'Student_{student_count}.docx')
@@ -124,7 +179,6 @@ def split_document(input_file_path, output_directory='split_documents', log_func
             update_status("No student documents were created. Check if document has page breaks.", "warning")
         else:
             update_status(f"Created {student_count} student documents", "success")
-            # List all created files
             created_files = os.listdir(output_directory)
             update_status(f"Files in output directory: {', '.join(created_files)}")
         
