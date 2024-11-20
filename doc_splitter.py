@@ -119,7 +119,10 @@ def split_document(input_file_path, output_directory='split_documents', log_func
                     new_para = overview_doc.add_paragraph()
                     new_para.text = element.text
             elif hasattr(element, 'rows'):  # Table
-                table = overview_doc.add_table(rows=len(element.rows), cols=len(element.rows[0].cells))
+                # Get the correct number of columns for this table
+                num_cols = max(len(row.cells) for row in element.rows)
+                table = overview_doc.add_table(rows=len(element.rows), cols=num_cols)
+                # Copy table content and structure
                 for i, row in enumerate(element.rows):
                     for j, cell in enumerate(row.cells):
                         table.rows[i].cells[j].text = cell.text
@@ -148,7 +151,10 @@ def split_document(input_file_path, output_directory='split_documents', log_func
                         new_para = student_doc.add_paragraph()
                         new_para.text = element.text
                 elif hasattr(element, 'rows'):  # Table
-                    table = student_doc.add_table(rows=len(element.rows), cols=len(element.rows[0].cells))
+                    # Get the correct number of columns for this table
+                    num_cols = max(len(row.cells) for row in element.rows)
+                    table = student_doc.add_table(rows=len(element.rows), cols=num_cols)
+                    # Copy table content and structure
                     for i, row in enumerate(element.rows):
                         for j, cell in enumerate(row.cells):
                             table.rows[i].cells[j].text = cell.text
@@ -164,7 +170,10 @@ def split_document(input_file_path, output_directory='split_documents', log_func
                         new_para = student_doc.add_paragraph()
                         new_para.text = element.text
                 elif hasattr(element, 'rows'):  # Table
-                    table = student_doc.add_table(rows=len(element.rows), cols=len(element.rows[0].cells))
+                    # Get the correct number of columns for this table
+                    num_cols = max(len(row.cells) for row in element.rows)
+                    table = student_doc.add_table(rows=len(element.rows), cols=num_cols)
+                    # Copy table content and structure
                     for i, row in enumerate(element.rows):
                         for j, cell in enumerate(row.cells):
                             table.rows[i].cells[j].text = cell.text
