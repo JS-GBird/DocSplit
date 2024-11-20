@@ -5,6 +5,7 @@ from docx.enum.text import WD_BREAK
 import os
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from copy import deepcopy
 
 def split_document(input_file_path, output_directory='split_documents', log_function=None):
     def update_status(message, type="info"):
@@ -12,23 +13,6 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         print(f"[{type.upper()}] {message}")  # Always print to console
         if log_function:
             log_function(message, type)
-    
-    def get_page_content(page):
-        """Get all content from a page including tables"""
-        content = []
-        for element in page:
-            if hasattr(element, 'text'):  # Regular paragraph
-                content.append(element.text.strip())
-            elif hasattr(element, 'tables'):  # Table container
-                for table in element.tables:
-                    for row in table.rows:
-                        for cell in row.cells:
-                            content.append(cell.text.strip())
-            elif hasattr(element, 'rows'):  # Direct table
-                for row in element.rows:
-                    for cell in row.cells:
-                        content.append(cell.text.strip())
-        return '\n'.join(filter(None, content))
     
     # Verify input file exists
     if not os.path.exists(input_file_path):
@@ -49,136 +33,99 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         update_status("Loading document...")
         doc = Document(input_file_path)
         
-        # Verify document content
-        update_status(f"Document has {len(doc.paragraphs)} paragraphs and {len(doc.tables)} tables")
-        
-        # Initialize variables
-        all_pages = [[]]
-        current_page_idx = 0
+        # Find all section breaks (page breaks)
+        page_breaks = []
+        current_length = 0
         
         update_status("Analyzing document structure...")
         
-        # Process both paragraphs and tables
-        elements = []
-        current_table = None
+        # Iterate through paragraphs to find page breaks
+        for para in doc.paragraphs:
+            current_length += 1
+            for run in para.runs:
+                element = run._element
+                for br in element.findall('.//w:br', {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}):
+                    if br.get(qn('w:type')) == 'page':
+                        page_breaks.append(current_length)
+                        update_status(f"Found page break at position {current_length}")
         
-        # Combine paragraphs and tables in order
-        for element in doc.element.body:
-            if element.tag.endswith('p'):
-                if current_table:
-                    elements.append(current_table)
-                    current_table = None
-                elements.append(doc.paragraphs[len([e for e in elements if hasattr(e, 'text')])])
-            elif element.tag.endswith('tbl'):
-                current_table = doc.tables[len([e for e in elements if hasattr(e, 'rows')])]
-                
-        # Add final table if exists
-        if current_table:
-            elements.append(current_table)
-        
-        # Process all elements
-        for element in elements:
-            # Add element to current page
-            all_pages[current_page_idx].append(element)
+        if not page_breaks:
+            update_status("No page breaks found in document", "warning")
+            return 0
             
-            # Check for page breaks in paragraphs
-            if hasattr(element, 'runs'):
-                for run in element.runs:
-                    element = run._element
-                    for br in element.findall('.//w:br', {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}):
-                        if br.get(qn('w:type')) == 'page':
-                            update_status(f"Page break detected...")
-                            current_page_idx += 1
-                            all_pages.append([])
-                            break
-        
-        update_status(f"Document split into {len(all_pages)} pages")
-        
-        # Debug information about pages including table content
-        for idx, page in enumerate(all_pages):
-            content = get_page_content(page)
-            update_status(f"Page {idx + 1} content length: {len(content)} characters")
-            if len(content) > 0:
-                update_status(f"Page {idx + 1} preview: {content[:100]}...")
-        
-        # Remove empty pages - check both text and table content
-        all_pages = [page for page in all_pages if get_page_content(page)]
-        
-        if not all_pages:
-            update_status("No content found in document", type="error")
-            raise ValueError("Document appears to be empty")
-            
-        update_status(f"Found {len(all_pages)} non-empty pages")
+        update_status(f"Found {len(page_breaks)} page breaks")
         
         # Create overview document (first page)
         update_status("Creating overview document...")
         overview_doc = Document()
-        for element in all_pages[0]:
-            if hasattr(element, 'text'):  # Paragraph
-                if element.text.strip():
-                    new_para = overview_doc.add_paragraph()
-                    new_para.text = element.text
-            elif hasattr(element, 'rows'):  # Table
-                # Get the correct number of columns for this table
-                num_cols = max(len(row.cells) for row in element.rows)
-                table = overview_doc.add_table(rows=len(element.rows), cols=num_cols)
-                # Copy table content and structure
-                for i, row in enumerate(element.rows):
-                    for j, cell in enumerate(row.cells):
-                        table.rows[i].cells[j].text = cell.text
+        
+        # Copy document properties and styles
+        overview_doc.styles = doc.styles
+        
+        # Copy content up to first page break
+        end_idx = page_breaks[0] if page_breaks else len(doc.paragraphs)
+        for element in doc.element.body[:end_idx]:
+            overview_doc.element.body.append(deepcopy(element))
         
         overview_path = os.path.join(output_directory, 'Overview.docx')
         overview_doc.save(overview_path)
         update_status(f"Saved overview document: {overview_path}", type="success")
         
-        # Create individual student documents (remaining pages)
+        # Create student documents
         student_count = 0
-        for idx, page in enumerate(all_pages[1:], 1):
-            # Skip truly empty pages
-            if not get_page_content(page):
-                update_status(f"Skipping empty page {idx}")
+        start_idx = 0
+        
+        for i, break_idx in enumerate(page_breaks):
+            # Skip if this would create an empty document
+            if break_idx - start_idx <= 1:
+                start_idx = break_idx
                 continue
                 
             student_count += 1
             update_status(f"Processing student document {student_count}...")
             student_doc = Document()
             
-            # Add overview content
-            update_status("Adding overview to student document...")
-            for element in all_pages[0]:
-                if hasattr(element, 'text'):  # Paragraph
-                    if element.text.strip():
-                        new_para = student_doc.add_paragraph()
-                        new_para.text = element.text
-                elif hasattr(element, 'rows'):  # Table
-                    # Get the correct number of columns for this table
-                    num_cols = max(len(row.cells) for row in element.rows)
-                    table = student_doc.add_table(rows=len(element.rows), cols=num_cols)
-                    # Copy table content and structure
-                    for i, row in enumerate(element.rows):
-                        for j, cell in enumerate(row.cells):
-                            table.rows[i].cells[j].text = cell.text
+            # Copy document properties and styles
+            student_doc.styles = doc.styles
+            
+            # Copy overview content
+            update_status("Adding overview content...")
+            for element in doc.element.body[:page_breaks[0]]:
+                student_doc.element.body.append(deepcopy(element))
             
             # Add page break after overview
             student_doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
             
-            # Add student content
+            # Copy student content
             update_status("Adding student content...")
-            for element in page:
-                if hasattr(element, 'text'):  # Paragraph
-                    if element.text.strip():
-                        new_para = student_doc.add_paragraph()
-                        new_para.text = element.text
-                elif hasattr(element, 'rows'):  # Table
-                    # Get the correct number of columns for this table
-                    num_cols = max(len(row.cells) for row in element.rows)
-                    table = student_doc.add_table(rows=len(element.rows), cols=num_cols)
-                    # Copy table content and structure
-                    for i, row in enumerate(element.rows):
-                        for j, cell in enumerate(row.cells):
-                            table.rows[i].cells[j].text = cell.text
+            for element in doc.element.body[start_idx:break_idx]:
+                student_doc.element.body.append(deepcopy(element))
             
             # Save student document
+            output_path = os.path.join(output_directory, f'Student_{student_count}.docx')
+            student_doc.save(output_path)
+            update_status(f"Saved student document: {output_path}", type="success")
+            
+            start_idx = break_idx
+        
+        # Process the last section if it exists
+        if start_idx < len(doc.element.body) - 1:
+            student_count += 1
+            update_status(f"Processing final student document {student_count}...")
+            student_doc = Document()
+            student_doc.styles = doc.styles
+            
+            # Copy overview content
+            for element in doc.element.body[:page_breaks[0]]:
+                student_doc.element.body.append(deepcopy(element))
+            
+            # Add page break after overview
+            student_doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
+            
+            # Copy final student content
+            for element in doc.element.body[start_idx:]:
+                student_doc.element.body.append(deepcopy(element))
+            
             output_path = os.path.join(output_directory, f'Student_{student_count}.docx')
             student_doc.save(output_path)
             update_status(f"Saved student document: {output_path}", type="success")
@@ -199,7 +146,6 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         update_status(error_msg, "error")
         raise
 
-# Add a test function
 def test_split_document(input_path):
     """Test function to verify document splitting"""
     print(f"Testing document split for: {input_path}")
