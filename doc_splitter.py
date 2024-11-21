@@ -33,14 +33,18 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         update_status("Loading document...")
         source_doc = Document(input_file_path)
         
+        # Store the original document's section properties
+        section_props = source_doc._element.body.sectPr
+        
         # Initialize variables for page collection
         all_pages = []
         current_page = []
         
         update_status("Analyzing document structure...")
         
-        # Collect all elements while preserving their exact structure
+        # Collect all elements from the source document
         for element in source_doc._element.body:
+            # Skip section properties
             if element.tag.endswith('sectPr'):
                 continue
                 
@@ -57,7 +61,7 @@ def split_document(input_file_path, output_directory='split_documents', log_func
             
             # If page break found, start new page
             if has_page_break:
-                all_pages.append(list(current_page))  # Create a copy of the list
+                all_pages.append(current_page)
                 current_page = []
                 update_status(f"Page break detected - Page {len(all_pages)}")
         
@@ -73,13 +77,16 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         
         # Create overview document (first page)
         update_status("Creating overview document...")
-        overview_doc = Document(input_file_path)  # Start with a copy of original
+        overview_doc = Document()
         overview_doc._element.body.clear_content()
         
-        # Copy first page content
+        # Copy first page content exactly as is
         for element in all_pages[0]:
-            new_element = element.copy()  # Create a proper copy
-            overview_doc._element.body.append(new_element)
+            overview_doc._element.body.append(element)
+        
+        # Add section properties
+        if section_props is not None:
+            overview_doc._element.body.append(section_props)
         
         overview_path = os.path.join(output_directory, 'Overview.docx')
         overview_doc.save(overview_path)
@@ -90,16 +97,14 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         for idx, page_elements in enumerate(all_pages[1:], 1):
             update_status(f"Processing student document {idx}...")
             
-            # Create new document from original to preserve styles
-            student_doc = Document(input_file_path)
+            student_doc = Document()
             student_doc._element.body.clear_content()
             
-            # Copy overview (first page)
+            # Copy overview (first page) exactly as is
             for element in all_pages[0]:
-                new_element = element.copy()
-                student_doc._element.body.append(new_element)
+                student_doc._element.body.append(element)
             
-            # Add page break
+            # Add page break between overview and student content
             page_break = OxmlElement('w:p')
             r = OxmlElement('w:r')
             br = OxmlElement('w:br')
@@ -108,10 +113,13 @@ def split_document(input_file_path, output_directory='split_documents', log_func
             page_break.append(r)
             student_doc._element.body.append(page_break)
             
-            # Add student content
+            # Add student content exactly as is
             for element in page_elements:
-                new_element = element.copy()
-                student_doc._element.body.append(new_element)
+                student_doc._element.body.append(element)
+            
+            # Add section properties
+            if section_props is not None:
+                student_doc._element.body.append(section_props)
             
             # Save student document
             student_count += 1
