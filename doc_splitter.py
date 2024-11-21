@@ -15,21 +15,35 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         if log_function:
             log_function(message, type)
     
-    # Verify input file exists
-    if not os.path.exists(input_file_path):
-        error_msg = f"Input file not found: {input_file_path}"
-        update_status(error_msg, "error")
-        raise FileNotFoundError(error_msg)
-    
-    update_status(f"Found input file: {input_file_path}")
-    update_status(f"File size: {os.path.getsize(input_file_path)/1024:.2f} KB")
-    
-    # Create output directory
-    if not os.path.exists(output_directory):
-        os.makedirs(output_directory)
-        update_status(f"Created output directory: {output_directory}")
+    def extract_student_name(elements):
+        """Extract student name from the first table in the elements"""
+        for element in elements:
+            if element.tag.endswith('tbl'):  # Found a table
+                for row in element.findall('.//w:tr', {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}):
+                    cells = row.findall('.//w:t', {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'})
+                    for cell in cells:
+                        text = cell.text
+                        if 'Student:' in text or 'Student' in text:
+                            # Extract name after "Student:" or "Student"
+                            name = text.split(':', 1)[1].strip() if ':' in text else text.replace('Student', '').strip()
+                            return name
+        return None
     
     try:
+        # Verify input file exists
+        if not os.path.exists(input_file_path):
+            error_msg = f"Input file not found: {input_file_path}"
+            update_status(error_msg, "error")
+            raise FileNotFoundError(error_msg)
+        
+        update_status(f"Found input file: {input_file_path}")
+        update_status(f"File size: {os.path.getsize(input_file_path)/1024:.2f} KB")
+        
+        # Create output directory
+        if not os.path.exists(output_directory):
+            os.makedirs(output_directory)
+            update_status(f"Created output directory: {output_directory}")
+        
         # Load the input document
         update_status("Loading document...")
         source_doc = Document(input_file_path)
@@ -58,9 +72,8 @@ def split_document(input_file_path, output_directory='split_documents', log_func
             
             # If page break found, start new page
             if has_page_break:
-                # Remove the page break element from the current page
                 if current_page:
-                    current_page.pop()
+                    current_page.pop()  # Remove page break
                 all_pages.append(list(current_page))
                 current_page = []
                 update_status(f"Page break detected - Page {len(all_pages)}")
@@ -75,35 +88,29 @@ def split_document(input_file_path, output_directory='split_documents', log_func
             update_status("No content found in document", "error")
             raise ValueError("Document appears to be empty")
         
-        # Create overview document (first page)
-        update_status("Creating overview document...")
-        overview_doc = Document(input_file_path)  # Start with a copy of original
-        overview_doc._element.body.clear_content()
-        
-        # Copy first page content
-        for element in all_pages[0]:
-            new_element = deepcopy(element)
-            overview_doc._element.body.append(new_element)
-        
-        overview_path = os.path.join(output_directory, 'Overview.docx')
-        overview_doc.save(overview_path)
-        update_status(f"Saved overview document: {overview_path}", type="success")
-        
         # Create individual student documents
         student_count = 0
+        overview_content = all_pages[0]  # Store overview for reuse
+        
         for idx, page_elements in enumerate(all_pages[1:], 1):
-            update_status(f"Processing student document {idx}...")
+            # Extract student name from the page
+            student_name = extract_student_name(page_elements)
+            if not student_name:
+                update_status(f"Warning: Could not find student name on page {idx}, using default name", "warning")
+                student_name = f"Unknown_Student_{idx}"
+            else:
+                update_status(f"Found student: {student_name}")
             
             # Create new document from original to preserve styles
             student_doc = Document(input_file_path)
             student_doc._element.body.clear_content()
             
             # Copy overview (first page)
-            for element in all_pages[0]:
+            for element in overview_content:
                 new_element = deepcopy(element)
                 student_doc._element.body.append(new_element)
             
-            # Add page break properly
+            # Add page break
             p = OxmlElement('w:p')
             r = OxmlElement('w:r')
             br = OxmlElement('w:br')
@@ -117,11 +124,12 @@ def split_document(input_file_path, output_directory='split_documents', log_func
                 new_element = deepcopy(element)
                 student_doc._element.body.append(new_element)
             
-            # Save student document
+            # Save student document with their name
             student_count += 1
-            output_path = os.path.join(output_directory, f'Student_{student_count}.docx')
+            safe_name = "".join(c for c in student_name if c.isalnum() or c in (' ', '_', '-')).strip()
+            output_path = os.path.join(output_directory, f'{safe_name}.docx')
             student_doc.save(output_path)
-            update_status(f"Saved student document: {output_path}", type="success")
+            update_status(f"Saved document for: {student_name}", type="success")
         
         if student_count == 0:
             update_status("No student documents were created. Check if document has page breaks.", "warning")
