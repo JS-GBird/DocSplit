@@ -31,52 +31,60 @@ def split_document(input_file_path, output_directory='split_documents', log_func
     try:
         # Load the input document
         update_status("Loading document...")
-        doc = Document(input_file_path)
+        source_doc = Document(input_file_path)
         
-        # Initialize variables
-        all_pages = [[]]
-        current_page_idx = 0
+        # Store the original document's section properties
+        section_props = source_doc._element.body.sectPr
+        
+        # Initialize variables for page collection
+        all_pages = []
+        current_page = []
         
         update_status("Analyzing document structure...")
         
-        # Get all elements while preserving exact structure
-        current_elements = []
-        
-        # Store section properties
-        section_props = doc._element.body.sectPr
-        
-        # Iterate through all elements in document body
-        for element in doc._body._body:
-            current_elements.append(element)
-            
+        # Collect all elements from the source document
+        for element in source_doc._element.body:
+            # Skip section properties
+            if element.tag.endswith('sectPr'):
+                continue
+                
             # Check for page breaks
+            has_page_break = False
             if element.tag.endswith('p'):
                 for child in element.iter():
                     if child.tag.endswith('br') and child.get(qn('w:type')) == 'page':
-                        # Store current page elements
-                        all_pages[current_page_idx] = current_elements.copy()
-                        current_page_idx += 1
-                        all_pages.append([])
-                        current_elements = []
-                        update_status(f"Page break detected - Page {current_page_idx}")
+                        has_page_break = True
                         break
+            
+            # Add element to current page
+            current_page.append(element)
+            
+            # If page break found, start new page
+            if has_page_break:
+                all_pages.append(current_page)
+                current_page = []
+                update_status(f"Page break detected - Page {len(all_pages)}")
         
-        # Add remaining elements to the last page
-        if current_elements:
-            all_pages[current_page_idx] = current_elements
+        # Add last page if it has content
+        if current_page:
+            all_pages.append(current_page)
         
         update_status(f"Document split into {len(all_pages)} pages")
+        
+        if not all_pages:
+            update_status("No content found in document", "error")
+            raise ValueError("Document appears to be empty")
         
         # Create overview document (first page)
         update_status("Creating overview document...")
         overview_doc = Document()
-        overview_doc._body._body.clear()  # Clear default content
+        overview_doc._element.body.clear_content()
         
-        # Copy first page content
+        # Copy first page content exactly as is
         for element in all_pages[0]:
-            overview_doc._body._body.append(element)
+            overview_doc._element.body.append(element)
         
-        # Add section properties at the end
+        # Add section properties
         if section_props is not None:
             overview_doc._element.body.append(section_props)
         
@@ -87,32 +95,29 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         # Create individual student documents
         student_count = 0
         for idx, page_elements in enumerate(all_pages[1:], 1):
-            if not page_elements:
-                update_status(f"Skipping empty page {idx}")
-                continue
-            
             update_status(f"Processing student document {idx}...")
+            
             student_doc = Document()
-            student_doc._body._body.clear()  # Clear default content
+            student_doc._element.body.clear_content()
             
-            # Copy overview content
+            # Copy overview (first page) exactly as is
             for element in all_pages[0]:
-                student_doc._body._body.append(element)
+                student_doc._element.body.append(element)
             
-            # Add page break
+            # Add page break between overview and student content
             page_break = OxmlElement('w:p')
             r = OxmlElement('w:r')
             br = OxmlElement('w:br')
             br.set(qn('w:type'), 'page')
             r.append(br)
             page_break.append(r)
-            student_doc._body._body.append(page_break)
+            student_doc._element.body.append(page_break)
             
-            # Add student content
+            # Add student content exactly as is
             for element in page_elements:
-                student_doc._body._body.append(element)
+                student_doc._element.body.append(element)
             
-            # Add section properties at the end
+            # Add section properties
             if section_props is not None:
                 student_doc._element.body.append(section_props)
             
