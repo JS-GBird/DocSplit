@@ -58,7 +58,10 @@ def split_document(input_file_path, output_directory='split_documents', log_func
             
             # If page break found, start new page
             if has_page_break:
-                all_pages.append(list(current_page))  # Create a copy of the list
+                # Remove the page break element from the current page
+                if current_page:
+                    current_page.pop()
+                all_pages.append(list(current_page))
                 current_page = []
                 update_status(f"Page break detected - Page {len(all_pages)}")
         
@@ -100,14 +103,14 @@ def split_document(input_file_path, output_directory='split_documents', log_func
                 new_element = deepcopy(element)
                 student_doc._element.body.append(new_element)
             
-            # Add page break
-            page_break = OxmlElement('w:p')
-            r = OxmlElement('w:r')
-            br = OxmlElement('w:br')
-            br.set(qn('w:type'), 'page')
-            r.append(br)
-            page_break.append(r)
-            student_doc._element.body.append(page_break)
+            # Add single page break
+            student_doc._element.body.append(
+                OxmlElement('w:p')
+            ).append(
+                OxmlElement('w:r')
+            ).append(
+                OxmlElement('w:br', {'w:type': 'page'})
+            )
             
             # Add student content
             for element in page_elements:
