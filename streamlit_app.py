@@ -19,7 +19,6 @@ def main():
     # Create a container for logs that won't be overwritten
     log_area = st.container()
     with log_area:
-        st.markdown("### Processing Logs")
         log_placeholder = st.empty()
         logs = []
         
@@ -36,7 +35,6 @@ def main():
     )
 
     if uploaded_file:
-        st.markdown("### File Details")
         st.write(f"Filename: {uploaded_file.name}")
         st.write(f"Size: {uploaded_file.size/1024:.2f} KB")
 
