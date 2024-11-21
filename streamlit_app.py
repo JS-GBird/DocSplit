@@ -23,7 +23,7 @@ def main():
     )
 
     if uploaded_file:
-        st.markdown("#### File Details")
+        st.markdown("### File Details")
         st.write(f"Filename: {uploaded_file.name}")
         st.write(f"Size: {uploaded_file.size/1024:.2f} KB")
 
