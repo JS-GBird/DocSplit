@@ -19,14 +19,36 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         """Extract student name from the first table in the elements"""
         for element in elements:
             if element.tag.endswith('tbl'):  # Found a table
+                # Get all text elements in the table
+                all_texts = element.findall('.//w:t', {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'})
+                
+                # First try to find "Student:" label
+                for i, text_elem in enumerate(all_texts):
+                    text = text_elem.text if text_elem.text else ""
+                    if text.strip().lower() == "student:" or text.strip().lower() == "student":
+                        # Get the next text element(s) which should contain the name
+                        name_parts = []
+                        j = i + 1
+                        while j < len(all_texts) and not all_texts[j].text.strip().lower().startswith(("company", "course", "date")):
+                            name_parts.append(all_texts[j].text.strip())
+                            j += 1
+                        if name_parts:
+                            return " ".join(name_parts).strip()
+                
+                # If not found, try to find in combined cell text
                 for row in element.findall('.//w:tr', {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}):
-                    cells = row.findall('.//w:t', {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'})
-                    for cell in cells:
-                        text = cell.text
-                        if 'Student:' in text or 'Student' in text:
-                            # Extract name after "Student:" or "Student"
-                            name = text.split(':', 1)[1].strip() if ':' in text else text.replace('Student', '').strip()
+                    row_text = ""
+                    for text_elem in row.findall('.//w:t', {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}):
+                        if text_elem.text:
+                            row_text += text_elem.text
+                    
+                    row_text = row_text.strip()
+                    if "Student:" in row_text or "Student" in row_text:
+                        # Extract name after "Student:" or "Student"
+                        name = row_text.split(':', 1)[1].strip() if ':' in row_text else row_text.replace('Student', '').strip()
+                        if name:
                             return name
+        
         return None
     
     try:
