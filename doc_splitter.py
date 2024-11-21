@@ -6,6 +6,7 @@ import os
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from copy import deepcopy
+from lxml import etree
 
 def split_document(input_file_path, output_directory='split_documents', log_function=None):
     def update_status(message, type="info"):
@@ -78,7 +79,7 @@ def split_document(input_file_path, output_directory='split_documents', log_func
         
         # Copy first page content
         for element in all_pages[0]:
-            new_element = element.copy()  # Create a proper copy
+            new_element = deepcopy(element)
             overview_doc._element.body.append(new_element)
         
         overview_path = os.path.join(output_directory, 'Overview.docx')
@@ -96,7 +97,7 @@ def split_document(input_file_path, output_directory='split_documents', log_func
             
             # Copy overview (first page)
             for element in all_pages[0]:
-                new_element = element.copy()
+                new_element = deepcopy(element)
                 student_doc._element.body.append(new_element)
             
             # Add page break
@@ -110,7 +111,7 @@ def split_document(input_file_path, output_directory='split_documents', log_func
             
             # Add student content
             for element in page_elements:
-                new_element = element.copy()
+                new_element = deepcopy(element)
                 student_doc._element.body.append(new_element)
             
             # Save student document
