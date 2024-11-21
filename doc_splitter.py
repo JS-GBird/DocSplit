@@ -103,14 +103,14 @@ def split_document(input_file_path, output_directory='split_documents', log_func
                 new_element = deepcopy(element)
                 student_doc._element.body.append(new_element)
             
-            # Add single page break
-            student_doc._element.body.append(
-                OxmlElement('w:p')
-            ).append(
-                OxmlElement('w:r')
-            ).append(
-                OxmlElement('w:br', {'w:type': 'page'})
-            )
+            # Add page break properly
+            p = OxmlElement('w:p')
+            r = OxmlElement('w:r')
+            br = OxmlElement('w:br')
+            br.set(qn('w:type'), 'page')
+            r.append(br)
+            p.append(r)
+            student_doc._element.body.append(p)
             
             # Add student content
             for element in page_elements:
